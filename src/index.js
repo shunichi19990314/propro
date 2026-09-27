@@ -15,6 +15,16 @@ import { uvPath } from "@titaniumnetwork-dev/ultraviolet";
 import { epoxyPath } from "@mercuryworkshop/epoxy-transport";
 import { baremuxPath } from "@mercuryworkshop/bare-mux/node";
 
+// 中継先のホワイトリスト (環境変数 WISP_WHITELIST: カンマ区切り正規表現)。
+// 設定すると開放リレー化(滥用)を防げます。個人利用なら必ず設定を。
+const wl = (process.env.WISP_WHITELIST || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (wl.length > 0) {
+  wisp.options.hostname_whitelist = wl.map((s) => new RegExp(s));
+}
+
 const WORKERS = Math.max(1, parseInt(process.env.UV_WORKERS || "1", 10));
 
 if (cluster.isPrimary && WORKERS > 1) {
