@@ -1,0 +1,10 @@
+# 自分のドメインに置き換える
+proxy.example.com {
+	# ロックダウン: コメントを外して使う (ハッシュは `caddy hash-password` で生成)
+	# basicauth /* {
+	# 	admin $2a$14$REPLACE_WITH_CADDY_HASH
+	# }
+
+	header X-Robots-Tag "noindex, nofollow"
+	reverse_proxy app:8080
+}

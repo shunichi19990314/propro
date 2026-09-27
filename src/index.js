@@ -31,6 +31,7 @@ server.on("request", (req, res) => {
   // COOP/COEP は UV がクライアント側フックを使うために推奨
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  res.setHeader("X-Robots-Tag", "noindex, nofollow");
   app(req, res);
 });
 
@@ -42,6 +43,16 @@ server.on("upgrade", (req, socket, head) => {
   }
   socket.end();
 });
+
+// 中継先のホワイトリスト (環境変数 WISP_WHITELIST: カンマ区切り正規表現)。
+// 設定すると開放リレー化(滥用)を防げます。個人利用なら必ず設定を。
+const wl = (process.env.WISP_WHITELIST || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (wl.length > 0) {
+  wisp.options.hostname_whitelist = wl.map((s) => new RegExp(s));
+}
 
 let port = parseInt(process.env.PORT || "");
 if (isNaN(port)) port = 8080;
