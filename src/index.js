@@ -47,6 +47,86 @@ function main() {
   app.use("/epoxy/", express.static(epoxyPath));
   app.use("/baremux/", express.static(baremuxPath));
 
+  // --- 加速ダウンロード: サーバー側で並列 Range 分割中継 (非対応なら単一ストリーム) ---
+  const WL_RE = wl.map((s) => new RegExp(s));
+  const makeQueue = () => {
+    const q = [];
+    let wait = null, done = false, err = null;
+    return {
+      get depth() { return q.length; },
+      push(c) { q.push(c); if (wait) { const w = wait; wait = null; w(); } },
+      end() { done = true; if (wait) { const w = wait; wait = null; w(); } },
+      fail(e) { err = e; done = true; if (wait) { const w = wait; wait = null; w(); } },
+      async shift() {
+        while (q.length === 0 && !done) await new Promise((r) => (wait = r));
+        if (q.length) return q.shift();
+        if (err) throw err;
+        return null;
+      },
+    };
+  };
+
+  app.get("/dl/", async (req, res) => {
+    const target = typeof req.query.url === "string" ? req.query.url : "";
+    if (!target) return void res.status(400).send("url required");
+    let u;
+    try { u = new URL(target); } catch { return void res.status(400).send("bad url"); }
+    if (WL_RE.length && !WL_RE.some((r) => r.test(u.hostname))) {
+      return void res.status(403).send("host not allowed");
+    }
+    const n = Math.min(8, Math.max(1, parseInt(req.query.n || "4", 10) || 4));
+    try {
+      const head = await fetch(u, { method: "HEAD", redirect: "follow" });
+      const len = parseInt(head.headers.get("content-length") || "0", 10) || 0;
+      const ranges = (head.headers.get("accept-ranges") || "") === "bytes";
+      res.setHeader("Content-Type", head.headers.get("content-type") || "application/octet-stream");
+      const disp = head.headers.get("content-disposition");
+      if (disp) res.setHeader("Content-Disposition", disp);
+      res.setHeader("Cache-Control", "no-store");
+
+      // Range 非対応 / サイズ不明 / n=1 はそのままパイプ
+      if (!ranges || !len || n === 1) {
+        const r = await fetch(u);
+        res.status(r.status);
+        if (len) res.setHeader("Content-Length", String(len));
+        for await (const c of r.body) if (!res.write(c)) await new Promise((r2) => res.once("drain", r2));
+        return void res.end();
+      }
+
+      // N 並列 Range を同時開始し、順番どおりにストリーム結合
+      res.setHeader("Content-Length", String(len));
+      const part = Math.ceil(len / n);
+      const queues = Array.from({ length: n }, makeQueue);
+      for (let i = 0; i < n; i++) {
+        const start = i * part;
+        const end = Math.min(len - 1, start + part - 1);
+        (async () => {
+          try {
+            const r = await fetch(u, { headers: { Range: `bytes=${start}-${end}` } });
+            if (r.status !== 206) throw new Error(`range ${i}: HTTP ${r.status}`);
+            for await (const c of r.body) {
+              queues[i].push(c);
+              while (queues[i].depth > 64) await new Promise((r2) => setTimeout(r2, 10));
+            }
+            queues[i].end();
+          } catch (e) { queues[i].fail(e); }
+        })();
+      }
+      try {
+        for (let i = 0; i < n; i++) {
+          let c;
+          while ((c = await queues[i].shift()) !== null) {
+            if (!res.write(c)) await new Promise((r2) => res.once("drain", r2));
+          }
+        }
+        res.end();
+      } catch (e) { res.destroy(); }
+    } catch (e) {
+      if (!res.headersSent) res.status(502).send(String(e));
+      else res.destroy();
+    }
+  });
+
   app.use((req, res) => {
     res.status(404);
     res.sendFile(fileURLToPath(new URL("../public/404.html", import.meta.url)));
