@@ -1,0 +1,19 @@
+{
+  "name": "uv-proxy",
+  "version": "1.0.0",
+  "description": "Minimal self-hostable Ultraviolet (UV) web proxy instance",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@mercuryworkshop/bare-mux": "^2.1.8",
+    "@mercuryworkshop/epoxy-transport": "^2.1.28",
+    "@mercuryworkshop/wisp-js": "^0.5.0",
+    "@titaniumnetwork-dev/ultraviolet": "^3.2.10",
+    "express": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
